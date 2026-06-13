@@ -70,12 +70,9 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -209,16 +206,9 @@ public class Main {
         NavicodeConfig config = NavicodeConfig.load();
         LlmClient llmClient = LlmClientFactory.createFromConfig(config);
         if (llmClient == null) {
-            if (!runFirstLaunchWizard(config, System.in, System.err)) {
-                System.err.println("❌ 错误: 未找到可用的 API Key");
-                System.err.println("请在 .env 文件中添加 GLM_API_KEY、DEEPSEEK_API_KEY、STEP_API_KEY、KIMI_API_KEY 或 FREELLMAPI_API_KEY");
-                System.exit(1);
-            }
-            llmClient = LlmClientFactory.createFromConfig(config);
-            if (llmClient == null) {
-                System.err.println("❌ 配置已保存，但仍无法创建 LLM 客户端，请检查 provider、API Key、base URL 和 model。");
-                System.exit(1);
-            }
+            System.err.println("❌ 错误: 未找到可用的 API Key");
+            System.err.println("请在 .env 文件中添加 GLM_API_KEY、DEEPSEEK_API_KEY、STEP_API_KEY、KIMI_API_KEY 或 FREELLMAPI_API_KEY");
+            System.exit(1);
         }
         AtomicReference<LlmClient> llmClientRef = new AtomicReference<>(llmClient);
 
@@ -2465,111 +2455,6 @@ public class Main {
             config.setProviders(new LinkedHashMap<>());
         }
         return config.getProviders().computeIfAbsent(provider, ignored -> new NavicodeConfig.ProviderConfig());
-    }
-
-    static boolean runFirstLaunchWizard(NavicodeConfig config, InputStream input, PrintStream out) {
-        if (Boolean.parseBoolean(System.getProperty("navicode.config.wizard.disabled", "false"))) {
-            return false;
-        }
-        try {
-            BufferedReader reader = new BufferedReader(new InputStreamReader(input));
-            out.println(AnsiStyle.heading("Navicode setup"));
-            out.println(AnsiStyle.subtle("No available API key was found. Choose a setup path:"));
-            out.println("> MiMo/Auto-compatible");
-            out.println("  OpenAI compatible");
-            out.println("  Import config");
-            out.println("  Skip");
-
-            String choice = prompt(reader, out, "Select [MiMo]: ");
-            return switch (normalizeSetupChoice(choice)) {
-                case "openai" -> configureOpenAiCompatibleSetup(config, reader, out, false);
-                case "import" -> importFirstLaunchConfig(config, reader, out);
-                case "skip" -> {
-                    out.println("Setup skipped.");
-                    yield false;
-                }
-                default -> configureOpenAiCompatibleSetup(config, reader, out, true);
-            };
-        } catch (IOException e) {
-            out.println("❌ 配置向导读取输入失败: " + e.getMessage());
-            return false;
-        }
-    }
-
-    private static String normalizeSetupChoice(String choice) {
-        String normalized = choice == null ? "" : choice.trim().toLowerCase(Locale.ROOT);
-        if (normalized.isBlank() || "1".equals(normalized) || "mimo".equals(normalized)
-                || "auto".equals(normalized) || "mimo/auto".equals(normalized)) {
-            return "mimo";
-        }
-        if ("2".equals(normalized) || "openai".equals(normalized) || "openai-compatible".equals(normalized)
-                || "openai compatible".equals(normalized)) {
-            return "openai";
-        }
-        if ("3".equals(normalized) || "import".equals(normalized) || "import config".equals(normalized)) {
-            return "import";
-        }
-        if ("4".equals(normalized) || "skip".equals(normalized) || "s".equals(normalized)) {
-            return "skip";
-        }
-        return "mimo";
-    }
-
-    private static boolean configureOpenAiCompatibleSetup(NavicodeConfig config,
-                                                          BufferedReader reader,
-                                                          PrintStream out,
-                                                          boolean autoDefaults) throws IOException {
-        String provider = "freellmapi";
-        String baseUrlPrompt = autoDefaults
-                ? "Base URL [http://localhost:5173/v1]: "
-                : "OpenAI-compatible base URL [http://localhost:5173/v1]: ";
-        String baseUrl = prompt(reader, out, baseUrlPrompt);
-        String apiKey = prompt(reader, out, "API Key (blank cancels; local gateways may accept any value): ");
-        if (apiKey.isBlank()) {
-            out.println("Setup cancelled.");
-            return false;
-        }
-        String model = prompt(reader, out, autoDefaults ? "Model [auto]: " : "Model [auto]: ");
-
-        NavicodeConfig.ProviderConfig providerConfig = ensureProviderConfig(config, provider);
-        providerConfig.setApiKey(apiKey.trim());
-        providerConfig.setBaseUrl(baseUrl.isBlank() ? "http://localhost:5173/v1" : baseUrl.trim());
-        providerConfig.setModel(model.isBlank() ? "auto" : model.trim());
-        config.setDefaultProvider(provider);
-        config.save();
-        out.println("✅ Setup saved. Default provider: " + provider);
-        return true;
-    }
-
-    private static boolean importFirstLaunchConfig(NavicodeConfig config,
-                                                   BufferedReader reader,
-                                                   PrintStream out) throws IOException {
-        String path = prompt(reader, out, "Config path (blank cancels): ");
-        if (path.isBlank()) {
-            out.println("Import cancelled.");
-            return false;
-        }
-        Path source = Path.of(path).toAbsolutePath().normalize();
-        if (Files.notExists(source)) {
-            out.println("❌ Config file not found: " + source);
-            return false;
-        }
-        Path target = NavicodeConfig.configFile();
-        Files.createDirectories(target.getParent());
-        Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
-
-        NavicodeConfig imported = NavicodeConfig.load();
-        config.setDefaultProvider(imported.getDefaultProvider());
-        config.setProviders(imported.getProviders());
-        out.println("✅ Config imported: " + target);
-        return true;
-    }
-
-    private static String prompt(BufferedReader reader, PrintStream out, String message) throws IOException {
-        out.print(message);
-        out.flush();
-        String line = reader.readLine();
-        return line == null ? "" : line.trim();
     }
 
     private static void printStartupScreen(PrintStream out, StartupScreenInfo info) {

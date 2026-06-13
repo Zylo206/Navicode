@@ -56,8 +56,6 @@ public class NavicodeConfig {
     public Map<String, ProviderConfig> getProviders() { return providers; }
     public void setProviders(Map<String, ProviderConfig> providers) { this.providers = providers; }
 
-    public static Path configFile() { return CONFIG_FILE; }
-
     public String getApiKey(String provider) {
         ProviderConfig providerConfig = providers.get(provider);
         if (providerConfig != null && providerConfig.getApiKey() != null && !providerConfig.getApiKey().isBlank()) {

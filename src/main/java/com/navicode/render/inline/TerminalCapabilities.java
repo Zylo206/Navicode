@@ -18,6 +18,9 @@ public final class TerminalCapabilities {
         if (terminal == null) {
             return false;
         }
+        if (forceAnsi()) {
+            return true;
+        }
         String type = terminal.getType();
         if (type != null && type.equalsIgnoreCase("dumb")) {
             return false;
@@ -28,6 +31,15 @@ public final class TerminalCapabilities {
         }
         String envTerm = System.getenv("TERM");
         return envTerm == null || !envTerm.equalsIgnoreCase("dumb");
+    }
+
+    private static boolean forceAnsi() {
+        String property = System.getProperty("navicode.force.ansi");
+        if (property != null && !property.isBlank()) {
+            return Boolean.parseBoolean(property.trim());
+        }
+        String env = System.getenv("NAVICODE_FORCE_ANSI");
+        return env != null && Boolean.parseBoolean(env.trim());
     }
 
     /**

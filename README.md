@@ -153,6 +153,18 @@ Agent 可调用的核心工具包括：
 
 代码库问题默认优先走 `glob_files` / `grep_code` / `read_file` 做实时精确定位；`search_code` 是语义辅助检索，不替代精确搜索。
 
+## 图片输入
+
+Navicode 支持把图片作为真实 LLM content block 发送，而不是只把路径或截图结果转成文字占位：
+
+- 本地图片：`@image:<./shot.png>`、`@image:file:///abs/path.png`、`@image:<file:///path with spaces.png>`。
+- 剪贴板：输入 `@clipboard`，或在 inline 终端里按 Ctrl+V 把系统剪贴板图片保存到 `~/.navicode/cache/` 并注入 `@image:<path>`。
+- MCP 截图：MCP 工具返回 `image content` 时，tool 文本保留 fallback，Navicode 会额外追加一条 user image message 给模型。
+- 执行路径：ReAct、`/plan`、`/team` 都走同一套图片输入链路。
+- 历史控制：旧历史里的 image payload 会替换成文本占位，只保留 Image source 等元信息，避免旧截图反复消耗上下文。
+
+图片统一经过 `ImageProcessor`：只接受 `image/*`，透明图铺白底，大图缩放 / 压缩到 5MB base64 API 上限内，不做 OCR。输入层不按模型名提前拒绝图片；如果当前 provider 或模型不支持图片，应显示 provider 返回的真实错误。GLM 多模态可用 `/model glm-5v-turbo` 切换。
+
 ## 记忆系统
 
 Navicode 把“当前会话上下文”和“跨会话稳定事实”分开管理：
@@ -289,7 +301,7 @@ npm install
 npm test
 ```
 
-当前桥接层已经能验证 Runtime API 文本闭环；真实 ilink 扫码登录、长轮询 monitor、发送消息、媒体下载/上传和 daemon 脚本仍是后续项。这个方案用于个人远程控制本机 Navicode，不等同于公众号或企业微信生产集成。详细说明见 [docs/wechat-bridge.md](docs/wechat-bridge.md)。
+当前桥接层已包含 ilink 二维码登录、账号保存、`getupdates` 长轮询、文本发送、typing、直连媒体下载和本地文件上传 helper。先执行 `npm start -- setup` 扫码绑定，再执行 `npm start -- start` 启动桥接。仍未完成的是无直连 URL 的加密 CDN 媒体解密、daemon 脚本、自动回传生成文件和真实微信账号端到端验收。这个方案用于个人远程控制本机 Navicode，不等同于公众号或企业微信生产集成。详细说明见 [docs/wechat-bridge.md](docs/wechat-bridge.md)。
 
 ## 数据落盘位置
 

@@ -217,11 +217,12 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 
 ### Image Input (Phase 21)
 
-- ContentPart 支持图片 block（base64 + mimeType）
-- ImageProcessor：铺白底/缩放 2000x2000/压缩 5MB
-- 输入：`@image:file:///path.png` / `@image:/path.png` / `@image:relative.png`
-- GLM-5V-Turbo 通过 `/model glm-5v-turbo` 切换
-- 历史 image payload 替换为文本占位，避免旧截图消耗上下文
+- `LlmClient.ContentPart` 支持 `text` / `image_base64` / `image_url`；纯文本仍序列化为 string content，图片消息序列化为 OpenAI-compatible content array
+- `ImageProcessor` 统一处理本地 `@image:`、`@clipboard` 和 MCP image content：透明图铺白底，超限图缩放 / 压缩到 5MB base64 API 上限内，不做 OCR
+- 输入：`@image:file:///path.png` / `@image:/path.png` / `@image:relative.png` / `@image:<file:///path with spaces.png>` / `@clipboard`；Ctrl+V 会把剪贴板图片保存到 `~/.navicode/cache/` 并注入 `@image:<path>`
+- CLI 输入层不按模型名拦截图片；GLM-5V-Turbo 可通过 `/model glm-5v-turbo` 切换，其他 provider 是否接受图片以 API 返回为准
+- ReAct / Plan task executor / SubAgent 都会把用户图片和 MCP `imageParts` 作为 user image message 送入模型；tool message 保留文本 fallback
+- 历史 image payload 会在下一轮前替换为文本占位，保留 Image source 等元信息，避免旧截图反复消耗上下文或污染新图分析
 
 ---
 

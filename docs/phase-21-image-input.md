@@ -1,6 +1,6 @@
 # 第 21 期：图片复制粘贴输入
 
-> 当前状态：MVP 已落地。第 20 期后台任务 + Runtime API 仍未纳入本次实现；本期只打通图片输入协议与 Agent 回灌链路。
+> 当前状态：MVP 已落地，自动验收已补齐。第 20 期后台任务 + Runtime API 与第 22 期 JLine 交互升级均保持兼容；本期聚焦图片输入协议、用户输入、MCP image 回灌和历史图片污染控制。
 
 ## 目标
 
@@ -29,7 +29,7 @@
   - 带 alpha 通道的小 PNG 会先铺白底重编码，避免不同 provider 对透明背景处理不一致
   - 大图先等比缩放到 2000x2000 范围内，并压缩到 5MB base64 API 上限内
   - 额外注入图片来源、原始尺寸、缩放后尺寸和坐标映射提示，不注入图片内容描述
-  - Agent 回灌链路：
+- Agent 回灌链路：
   - ReAct / Plan task executor / SubAgent 在工具结果后追加图片 user message
   - 本地 `@image:` 消息按「文本说明 / source 元信息 / 图片 block」顺序发送，图片 block 保持最后，避免模型优先盯着路径文本走工具兜底
   - 本地 `@image:` 文本会明确要求优先分析本轮图片；除非用户要求结合历史，历史对话、历史工具结果、网页 / 仓库信息只能作为背景，不能替代当前图片内容
@@ -40,6 +40,9 @@
   - 支持 `@image:file:///abs/path.png`
   - 支持 `@image:/abs/path.png` / `@image:relative/path.png`
   - 支持 `@image:<file:///path with spaces.png>`
+  - 支持中文路径、空格路径和 `%20` percent-encoded file URI
+  - 支持 `@clipboard`
+  - 支持 Ctrl+V 抓取系统剪贴板图片到 `~/.navicode/cache/clip-<ts>.png` 并注入 `@image:<path>`
   - 接受 `image/*` MIME；处理后的单图 base64 必须不超过 5MB
 
 ## 当前边界
@@ -50,11 +53,15 @@
 - 不把图片 OCR 成文本；图片统一以 image block 附加，provider API 负责最终能力校验
 - 对图片输入 token 成本只做粗略估算，真实计费仍以 provider usage 为准
 - 不按模型名在 Navicode 输入层拦截图片；如果 provider 不接受某个模型 / endpoint 的图片输入，应暴露 provider 的真实错误或走 provider 内部图片请求路由
+- 手动验证依赖本机 GUI、Chrome、测试图片和可用 LLM API Key；缺少这些环境时应记录未验证原因，而不是把自动测试通过等同于视觉模型端到端验收
 
 ## 验证
 
 ```bash
-mvn test -Dtest=AbstractOpenAiCompatibleClientImageInputTest,ImageReferenceParserTest,McpClientTest,McpToolRegistrationTest,LlmClientFactoryTest,TokenBudgetTest
+mvn test "-Dtest=AbstractOpenAiCompatibleClientImageInputTest,ImageReferenceParserTest,ImageProcessorTest,ClipboardImageTest,McpCallToolResultTest,McpClientTest,McpToolRegistrationTest,LlmClientFactoryTest,TokenBudgetTest" -DskipTests=false
+mvn test "-Dtest=ImageReferenceParserTest,ClipboardImageTest,NavicodeCompleterTest,NavicodeHighlighterTest,NavicodeHistoryTest,MainInputNormalizationTest" -DskipTests=false
+mvn test "-Dtest=Agent*Test,PlanExecuteAgentTest,SubAgentTest,McpToolRegistrationTest" -DskipTests=false
+mvn test "-Dtest=TokenBudgetTest,AbstractOpenAiCompatibleClientImageInputTest,AgentClearHistoryTest" -DskipTests=false
 ```
 
 覆盖点：
@@ -65,3 +72,14 @@ mvn test -Dtest=AbstractOpenAiCompatibleClientImageInputTest,ImageReferenceParse
 - MCP image content 转为 image parts
 - ToolRegistry 批量工具结果保留图片附件
 - TokenBudget 对图片输入做估算
+- ReAct / Plan / SubAgent 图片输入与 MCP image 回灌路径
+- 历史 image payload 替换为文本占位
+
+## 2026-06-13 自动验收记录
+
+- 协议 / 预处理 / MCP / token 估算 targeted tests：61 tests, 0 failures, 0 errors
+- 本地输入链路 targeted tests：60 tests, 0 failures, 0 errors
+- Agent / Plan / Team targeted tests：63 tests, 0 failures, 0 errors
+- 历史图片污染控制 targeted tests：19 tests, 0 failures, 0 errors
+
+仍需手动环境验收：GLM-5V 实际看图、本地图片、剪贴板、Ctrl+V、MCP `take_screenshot`、`/plan` 带图、`/team` 带图，以及 provider 不支持图片时的真实错误透传。

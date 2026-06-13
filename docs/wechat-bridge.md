@@ -103,13 +103,39 @@ Implemented:
 - Runtime API optional turn `cwd` propagation.
 - Runtime API `cancel` endpoint.
 - Runtime event renderer for headless Agent output.
-- TypeScript bridge skeleton for config, runtime client, thread map, message splitting, and command routing.
+- TypeScript bridge for config, runtime client, thread map, message splitting, and command routing.
+- ilink QR login and account persistence under `~/.navicode/wechat/accounts`.
+- ilink `getupdates` monitor with sync buffer persistence, message deduplication, and session-expired handling.
+- WeChat text sending, file/image sending helpers, and typing keepalive.
+- Direct URL media download into `~/.navicode/wechat/downloads`.
 - Mock tests for Runtime client, message splitter, commands, and the text submit/read/split loop.
 
 Remaining:
 
-- Real ilink QR setup, monitor, send, media download, and file upload modules.
+- Encrypted CDN media decryption for messages that do not expose a direct `cdn_url`.
 - PowerShell and POSIX daemon scripts.
-- Image/file prompt shaping from real WeChat messages.
 - Automatic file push for generated local files.
 - End-to-end manual test with a bound WeChat account.
+
+## Bridge Commands
+
+Install dependencies and verify:
+
+```powershell
+cd integrations/wechat-bridge
+npm install
+npm test
+```
+
+Bind a WeChat account:
+
+```powershell
+$env:NAVICODE_RUNTIME_API_KEY = "your-local-key"
+npm start -- setup
+```
+
+Start the bridge after Navicode Runtime API is running:
+
+```powershell
+npm start -- start
+```

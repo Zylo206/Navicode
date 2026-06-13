@@ -90,13 +90,13 @@
 
 预期：成功附加（裸路径不走 URI.create，本就支持空格）。
 
-### Case 9 — 贪婪匹配吞中文标点
+### Case 9 — 裸路径后跟中文标点
 
 ```
 帮我看 @image:./shot.png。这个里面是什么？
 ```
 
-预期：报"文件不存在"，因为 `shot.png。` 被当成完整路径。改用 `<…>` 显式包裹后能避免：
+预期：成功附加。当前解析器会在全角句号等中文标点处截断路径，并保留后续中文问题。也可以继续使用 `<…>` 显式包裹路径：
 
 ```
 帮我看 @image:<./shot.png>。这个里面是什么？
@@ -127,7 +127,7 @@ emulate 视口为 7680x4320，打开 https://www.apple.com，take_screenshot
 
 预期：fallback 文本里出现"图片超过 5MB 上限，未作为图片输入附加"或类似提示，下一轮 LLM 请求 body 不会塞这张图。
 
-### Case 12 — 普通模型对 MCP 截图退化为文本
+### Case 12 — 普通模型也应发送 MCP 截图图片块
 
 `/model deepseek`：
 
@@ -135,7 +135,7 @@ emulate 视口为 7680x4320，打开 https://www.apple.com，take_screenshot
 打开 https://example.com，take_screenshot
 ```
 
-预期：tool 返回 `[此工具返回了 image: …]` fallback，模型不会拿到真图。
+预期：tool 返回 `[此工具返回了 image: …]` fallback，随后 Navicode 仍按 `text + image_url/base64` 结构把图片块追加为 user message。若 provider 拒绝图片输入，应显示 provider 返回的真实错误，而不是在 Navicode 输入层提前降级成纯文本。
 
 ---
 
@@ -228,6 +228,22 @@ emulate 视口为 7680x4320，打开 https://www.apple.com，take_screenshot
 ## 8. 回归
 
 ```
-mvn test -Dtest=AbstractOpenAiCompatibleClientImageInputTest,ImageReferenceParserTest,ClipboardImageTest,McpCallToolResultTest,LlmClientFactoryTest,TokenBudgetTest,McpClientTest,McpToolRegistrationTest
-mvn test -Pquick
+mvn test "-Dtest=AbstractOpenAiCompatibleClientImageInputTest,ImageReferenceParserTest,ImageProcessorTest,ClipboardImageTest,McpCallToolResultTest,LlmClientFactoryTest,TokenBudgetTest,McpClientTest,McpToolRegistrationTest" -DskipTests=false
+mvn test "-Dtest=ImageReferenceParserTest,ClipboardImageTest,NavicodeCompleterTest,NavicodeHighlighterTest,NavicodeHistoryTest,MainInputNormalizationTest" -DskipTests=false
+mvn test "-Dtest=Agent*Test,PlanExecuteAgentTest,SubAgentTest,McpToolRegistrationTest" -DskipTests=false
+mvn test -Pquick -DskipTests=false
 ```
+
+## 9. 验收记录模板
+
+| 用例 | 结果 | 证据 / 备注 |
+|---|---|---|
+| 本地 `@image` | 待跑 | 需要测试图片 + LLM API Key |
+| 空格路径 | 待跑 | 需要测试图片 |
+| 中文路径 | 待跑 | 需要测试图片 |
+| `@clipboard` | 待跑 | 需要 GUI 剪贴板 |
+| Ctrl+V 注入 | 待跑 | 需要交互终端 + GUI 剪贴板 |
+| MCP `take_screenshot` | 待跑 | 需要 Chrome DevTools MCP + LLM API Key |
+| `/plan` 带图 | 待跑 | 需要 LLM API Key |
+| `/team` 带图 | 待跑 | 需要 LLM API Key |
+| provider 不支持图片 | 待跑 | 需要选择不支持图片的 provider / model |

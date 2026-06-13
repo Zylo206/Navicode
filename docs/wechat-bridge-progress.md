@@ -32,3 +32,14 @@
 - Verification attempted: `git diff --check`.
 - Verification result: passed; only Git line-ending warnings for existing Java working-copy normalization were reported.
 - Next: run the Maven JUnit commands once plugin resolution is available, run bridge `npm install`, `npm test`, and `npm run build` once TypeScript is installed, then fix any compile/test issues.
+
+## 2026-06-13 ilink modules
+
+- Implemented `src/wechat/login.ts`, `monitor.ts`, `send.ts`, and `media.ts`, plus supporting `api.ts`, `accounts.ts`, `sync-buf.ts`, and `types.ts`.
+- Wired `src/main.ts` with `npm start -- setup` for QR binding and `npm start -- start` for loading the latest account, long-polling ilink messages, submitting text to Runtime API, and sending split replies back to WeChat.
+- Media support now handles direct `cdn_url` downloads into `~/.navicode/wechat/downloads` and upload URL based local file sending helpers. Encrypted CDN media without direct URL remains a known gap.
+- Verification attempted: `npm.cmd run build`.
+- Verification result: passed.
+- Verification attempted: `npm.cmd test`.
+- Verification result: passed all 13 bridge tests, covering command routing, message splitting, Runtime client, submit text loop, QR login persistence, monitor dedupe/sync buffer, sendText payloads, and direct media download.
+- Next: test against a real bound WeChat account, then add encrypted CDN media decrypt and daemon scripts.
