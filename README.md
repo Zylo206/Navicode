@@ -21,6 +21,7 @@ Navicode 是一个面向代码库工作的 Java Agent CLI。它把 ReAct、Plan-
 - HITL：危险工具审批、路径策略、命令策略和 JSONL 审计。
 - Side-Git：每轮任务前后维护独立快照，可用 `revert_turn` 回滚。
 - Runtime API：本地 HTTP/SSE 接口，面向无头集成场景。
+- WeChat Bridge：个人微信远程控制的本地桥接骨架，走独立 Node daemon + Runtime API，不把微信 SDK 逻辑塞进主 CLI。
 - 图片输入：支持 `@image:`、剪贴板图片和支持视觉能力的模型。
 - Inline TUI：JLine 输入、高亮、补全、底部状态栏、工具块和 diff 展示。
 
@@ -28,6 +29,7 @@ Navicode 是一个面向代码库工作的 Java Agent CLI。它把 ReAct、Plan-
 
 - Java 17+
 - Maven
+- 可选：Node.js 18+，用于 `integrations/wechat-bridge/` 本地微信桥接。
 - 可选：`ripgrep`，`grep_code` 会优先使用它，未安装时回退 Java 扫描。
 - 至少一个模型 API Key：`GLM_API_KEY`、`DEEPSEEK_API_KEY`、`STEP_API_KEY`、`KIMI_API_KEY` / `MOONSHOT_API_KEY`、`FREELLMAPI_API_KEY`。
 - 如需 RAG：默认需要本地 Ollama embedding 服务，或配置其他 embedding provider。
@@ -238,7 +240,56 @@ Runtime API 只监听 `127.0.0.1`，并要求 API Key。
 
 - `POST /v1/threads`
 - `POST /v1/threads/{id}/turns`
+- `POST /v1/threads/{id}/cancel`
 - `GET /v1/threads/{id}/events`
+
+`POST /v1/threads/{id}/turns` 支持 `input` 和可选 `cwd`。同一个 Runtime thread 会复用会话状态，并按 thread 串行执行 turn，适合微信、脚本或其他本地守护进程连续调用。
+
+事件流面向桥接层消费，当前包括：
+
+- `thread.created`
+- `turn.queued`
+- `turn.started`
+- `message.delta`
+- `tool.calls`
+- `diff.summary`
+- `approval.required`
+- `turn.completed`
+- `turn.failed`
+- `turn.cancelled`
+
+## 微信个人号桥接
+
+Navicode 已加入个人微信接入的基础链路：
+
+```text
+微信个人号
+  <-> ilink Bot API
+  <-> Navicode WeChat Bridge daemon
+  <-> Navicode Runtime API
+  <-> Agent.run(...)
+```
+
+桥接层放在 `integrations/wechat-bridge/`，是独立 TypeScript/Node 项目。当前已实现：
+
+- Runtime API client：创建 thread、提交 turn、读取 SSE events、取消 turn。
+- Thread map：把微信用户映射到 Runtime thread，保留连续会话。
+- Message splitter：把长回复按微信消息长度分段。
+- Command router：`/help`、`/status`、`/clear`、`/stop`、`/cwd`。
+- Mock 文本闭环测试：提交文本 turn、读取 `message.delta`、分段输出。
+
+启动顺序：
+
+```powershell
+$env:NAVICODE_RUNTIME_API_KEY = "your-local-key"
+java -jar target/navicode-1.0-SNAPSHOT.jar serve --http --port 8080
+
+cd integrations/wechat-bridge
+npm install
+npm test
+```
+
+当前桥接层已经能验证 Runtime API 文本闭环；真实 ilink 扫码登录、长轮询 monitor、发送消息、媒体下载/上传和 daemon 脚本仍是后续项。这个方案用于个人远程控制本机 Navicode，不等同于公众号或企业微信生产集成。详细说明见 [docs/wechat-bridge.md](docs/wechat-bridge.md)。
 
 ## 数据落盘位置
 
@@ -252,6 +303,7 @@ Runtime API 只监听 `127.0.0.1`，并要求 API Key。
 | 审计日志 | `~/.navicode/audit/audit-YYYY-MM-DD.jsonl` |
 | Side-Git 快照 | `~/.navicode/snapshots/<project_hash>/<worktree_hash>/.git` |
 | Runtime API 数据 | `~/.navicode/runtime/` |
+| 微信桥接账号、会话、下载与日志 | `~/.navicode/wechat/` |
 | 后台任务 | `~/.navicode/tasks/tasks.db` |
 
 `.env`、`.navicode/`、`target/` 已在 `.gitignore` 中排除，不应提交真实密钥、工作区记忆或构建产物。
@@ -273,6 +325,8 @@ mvn test -Dtest=CliCommandParserTest,MemoryManagerTest,MemoryRetrieverTest -Dski
 | RAG | `mvn test -Dtest=CodeChunkerTest,CodeAnalyzerTest,VectorStoreTest,CodeIndexTest -DskipTests=false` |
 | 工具与策略 | `mvn test -Dtest=ToolRegistryTest,CodeSearchGoldenSetTest,ApprovalPolicyTest -DskipTests=false` |
 | TUI | `mvn test -Pphase16-smoke -DskipTests=false` |
+| Runtime API | `mvn test -Dtest=RuntimeApiServerTest -DskipTests=false` |
+| WeChat Bridge | `cd integrations/wechat-bridge && npm test` |
 
 ## 目录结构
 
@@ -308,5 +362,5 @@ src/main/java/com/navicode/
 - [docs/agents-reference.md](docs/agents-reference.md)：详细功能行为、配置读取顺序和实现约束。
 - [ROADMAP.md](ROADMAP.md)：阶段演进路线图。
 - [docs/phase-20-runtime-api.md](docs/phase-20-runtime-api.md)：后台任务与 Runtime API。
+- [docs/wechat-bridge.md](docs/wechat-bridge.md)：个人微信桥接架构、启动方式、安全边界和后续项。
 - [docs/phase-22-jline-interaction-upgrade.md](docs/phase-22-jline-interaction-upgrade.md)：JLine 交互升级。
-

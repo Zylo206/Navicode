@@ -5,6 +5,8 @@
 # 编译输出
 target/
 *.class
+node_modules/
+dist/
 
 # IDE
 .idea/

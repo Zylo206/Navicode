@@ -2,6 +2,8 @@ package com.navicode.runtime.api;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navicode.runtime.CancellationContext;
+import com.navicode.runtime.CancellationToken;
 import com.navicode.runtime.task.TaskRunner;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -11,15 +13,19 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 public class RuntimeApiServer implements AutoCloseable {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private final RuntimeThreadStore store;
-    private final TaskRunner runner;
+    private final RuntimeTurnRunner runner;
     private final String apiKey;
     private final HttpServer server;
+    private final Map<String, RuntimeThreadSession> sessions = new ConcurrentHashMap<>();
     private final ExecutorService executor = Executors.newCachedThreadPool(r -> {
         Thread thread = new Thread(r, "navicode-runtime-api");
         thread.setDaemon(true);
@@ -27,6 +33,10 @@ public class RuntimeApiServer implements AutoCloseable {
     });
 
     public RuntimeApiServer(RuntimeThreadStore store, TaskRunner runner, int port, String apiKey) throws IOException {
+        this(store, (RuntimeTurnRunner) context -> runner.run(context.input()), port, apiKey);
+    }
+
+    public RuntimeApiServer(RuntimeThreadStore store, RuntimeTurnRunner runner, int port, String apiKey) throws IOException {
         if (apiKey == null || apiKey.isBlank()) {
             throw new IllegalArgumentException("Runtime API 需要配置 NAVICODE_RUNTIME_API_KEY 或 -Dnavicode.runtime.api.key");
         }
@@ -71,6 +81,10 @@ public class RuntimeApiServer implements AutoCloseable {
                 handleTurn(exchange, threadId(path));
                 return;
             }
+            if ("POST".equals(method) && path.matches("/v1/threads/[^/]+/cancel")) {
+                handleCancel(exchange, threadId(path));
+                return;
+            }
             if ("GET".equals(method) && path.matches("/v1/threads/[^/]+/events")) {
                 handleEvents(exchange, threadId(path));
                 return;
@@ -92,23 +106,66 @@ public class RuntimeApiServer implements AutoCloseable {
             writeJson(exchange, 400, "{\"error\":\"input_required\"}");
             return;
         }
+        String cwd = body.path("cwd").asText("");
+        if (!cwd.isBlank()) {
+            store.updateThreadCwd(threadId, cwd);
+        }
         String turnId = "turn_" + Long.toHexString(System.nanoTime());
-        store.appendEvent(threadId, "turn.started",
+        store.updateThreadTurn(threadId, turnId);
+        RuntimeThreadSession session = sessions.computeIfAbsent(threadId, RuntimeThreadSession::new);
+        store.appendEvent(threadId, "turn.queued",
                 "{\"turn_id\":\"" + turnId + "\",\"input\":\"" + escape(input) + "\"}");
-        executor.submit(() -> runTurn(threadId, turnId, input));
-        writeJson(exchange, 202, "{\"id\":\"" + turnId + "\",\"object\":\"turn\",\"status\":\"running\"}");
+        session.submit(() -> runTurn(session, threadId, turnId, input, cwd));
+        writeJson(exchange, 202, "{\"id\":\"" + turnId + "\",\"object\":\"turn\",\"status\":\"queued\"}");
     }
 
-    private void runTurn(String threadId, String turnId, String input) {
+    private void handleCancel(HttpExchange exchange, String threadId) throws IOException {
+        if (!store.exists(threadId)) {
+            writeJson(exchange, 404, "{\"error\":\"thread_not_found\"}");
+            return;
+        }
+        RuntimeThreadSession session = sessions.get(threadId);
+        if (session == null || !session.cancelActive()) {
+            writeJson(exchange, 409, "{\"error\":\"no_running_turn\"}");
+            return;
+        }
+        writeJson(exchange, 200, "{\"object\":\"thread.cancel\",\"status\":\"cancelling\"}");
+    }
+
+    private void runTurn(RuntimeThreadSession session, String threadId, String turnId, String input, String cwd) {
+        CancellationToken token = CancellationContext.startRun();
+        session.markActive(turnId, token);
+        store.appendEvent(threadId, "turn.started",
+                "{\"turn_id\":\"" + turnId + "\",\"input\":\"" + escape(input) + "\"}");
+        RuntimeTurnContext context = new RuntimeTurnContext(
+                threadId,
+                turnId,
+                input,
+                cwd,
+                (eventType, dataJson) -> store.appendEvent(threadId, eventType, dataJson));
         try {
-            String result = runner.run(input);
-            store.appendEvent(threadId, "message.delta",
-                    "{\"turn_id\":\"" + turnId + "\",\"content\":\"" + escape(result) + "\"}");
-            store.appendEvent(threadId, "turn.completed",
-                    "{\"turn_id\":\"" + turnId + "\",\"status\":\"completed\"}");
+            String result = runner.run(context);
+            if (result != null && !result.isBlank()) {
+                context.emitMessageDelta(result);
+            }
+            if (CancellationContext.isCancelled()) {
+                store.appendEvent(threadId, "turn.cancelled",
+                        "{\"turn_id\":\"" + turnId + "\",\"status\":\"cancelled\"}");
+            } else {
+                store.appendEvent(threadId, "turn.completed",
+                        "{\"turn_id\":\"" + turnId + "\",\"status\":\"completed\"}");
+            }
         } catch (Exception e) {
-            store.appendEvent(threadId, "turn.failed",
-                    "{\"turn_id\":\"" + turnId + "\",\"error\":\"" + escape(e.getMessage()) + "\"}");
+            if (CancellationContext.isCancelled() || Thread.currentThread().isInterrupted()) {
+                store.appendEvent(threadId, "turn.cancelled",
+                        "{\"turn_id\":\"" + turnId + "\",\"status\":\"cancelled\"}");
+            } else {
+                store.appendEvent(threadId, "turn.failed",
+                        "{\"turn_id\":\"" + turnId + "\",\"error\":\"" + escape(e.getMessage()) + "\"}");
+            }
+        } finally {
+            session.clearActive(turnId);
+            CancellationContext.clear(token);
         }
     }
 
@@ -130,8 +187,7 @@ public class RuntimeApiServer implements AutoCloseable {
     private boolean authorized(HttpExchange exchange) {
         String auth = exchange.getRequestHeaders().getFirst("Authorization");
         String direct = exchange.getRequestHeaders().getFirst("X-Navicode-API-Key");
-        String legacyDirect = exchange.getRequestHeaders().getFirst("X-Navicode-API-Key");
-        return ("Bearer " + apiKey).equals(auth) || apiKey.equals(direct) || apiKey.equals(legacyDirect);
+        return ("Bearer " + apiKey).equals(auth) || apiKey.equals(direct);
     }
 
     private static String threadId(String path) {
@@ -188,5 +244,49 @@ public class RuntimeApiServer implements AutoCloseable {
     public void close() {
         server.stop(0);
         executor.shutdownNow();
+        sessions.values().forEach(RuntimeThreadSession::close);
+    }
+
+    private static final class RuntimeThreadSession implements AutoCloseable {
+        private final ExecutorService executor;
+        private volatile CancellationToken activeToken;
+        private volatile String activeTurnId;
+
+        private RuntimeThreadSession(String threadId) {
+            this.executor = Executors.newSingleThreadExecutor(r -> {
+                Thread thread = new Thread(r, "navicode-runtime-thread-" + threadId);
+                thread.setDaemon(true);
+                return thread;
+            });
+        }
+
+        private Future<?> submit(Runnable task) {
+            return executor.submit(task);
+        }
+
+        private synchronized void markActive(String turnId, CancellationToken token) {
+            activeTurnId = turnId;
+            activeToken = token;
+        }
+
+        private synchronized boolean cancelActive() {
+            if (activeToken == null || activeTurnId == null) {
+                return false;
+            }
+            activeToken.cancel();
+            return true;
+        }
+
+        private synchronized void clearActive(String turnId) {
+            if (turnId != null && turnId.equals(activeTurnId)) {
+                activeTurnId = null;
+                activeToken = null;
+            }
+        }
+
+        @Override
+        public void close() {
+            executor.shutdownNow();
+        }
     }
 }

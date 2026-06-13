@@ -38,7 +38,9 @@ import com.navicode.rag.SearchResultFormatter;
 import com.navicode.runtime.CancellationContext;
 import com.navicode.runtime.CancellationToken;
 import com.navicode.runtime.api.RuntimeApiServer;
+import com.navicode.runtime.api.RuntimeEventRenderer;
 import com.navicode.runtime.api.RuntimeThreadStore;
+import com.navicode.runtime.api.RuntimeTurnContext;
 import com.navicode.runtime.task.DurableTaskManager;
 import com.navicode.runtime.task.TaskCommandFormatter;
 import com.navicode.snapshot.RestoreResult;
@@ -78,6 +80,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
@@ -813,9 +817,10 @@ public class Main {
         int port = parseServePort(args, 8080);
         try {
             RuntimeThreadStore store = new RuntimeThreadStore(RuntimeThreadStore.defaultDbPath());
+            Map<String, Agent> runtimeAgents = new ConcurrentHashMap<>();
             RuntimeApiServer server = new RuntimeApiServer(
                     store,
-                    prompt -> runHeadlessTask(prompt, client),
+                    (RuntimeTurnContext context) -> runHeadlessTurn(context, client, runtimeAgents),
                     port,
                     RuntimeApiServer.configuredApiKey());
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -855,6 +860,32 @@ public class Main {
         registry.setProjectPath(Path.of(".").toAbsolutePath().normalize().toString());
         Agent agent = new Agent(llmClient, registry);
         return agent.run(prompt);
+    }
+
+    private static String runHeadlessTurn(RuntimeTurnContext context, LlmClient llmClient, Map<String, Agent> agents) {
+        Agent agent = agents.computeIfAbsent(context.threadId(), ignored -> {
+            ToolRegistry registry = new ToolRegistry();
+            registry.setProjectPath(runtimeCwd(context));
+            return new Agent(llmClient, registry);
+        });
+        agent.getToolRegistry().setProjectPath(runtimeCwd(context));
+        RuntimeEventRenderer renderer = new RuntimeEventRenderer(context);
+        agent.setRenderer(renderer);
+        agent.getToolRegistry().setWriteFileObserver((path, ba) -> renderer.appendDiff(path, ba[0], ba[1]));
+        renderer.start();
+        try {
+            return agent.run(context.input());
+        } finally {
+            renderer.close();
+        }
+    }
+
+    private static String runtimeCwd(RuntimeTurnContext context) {
+        String cwd = context.cwd();
+        if (cwd == null || cwd.isBlank()) {
+            cwd = ".";
+        }
+        return Path.of(cwd).toAbsolutePath().normalize().toString();
     }
 
     private static DurableTaskManager openTaskManager(AtomicReference<LlmClient> llmClientRef,
