@@ -28,6 +28,22 @@ public final class AnsiStyle {
         return wrap(BOLD + GREEN, text);
     }
 
+    public static String logoPrimary(String text) {
+        return wrap(BOLD + CYAN, text);
+    }
+
+    public static String logoSecondary(String text) {
+        return wrap(BOLD + GREEN, text);
+    }
+
+    public static String brand(String text) {
+        return wrap(BOLD, text);
+    }
+
+    public static String warning(String text) {
+        return wrap(BOLD + YELLOW, text);
+    }
+
     public static String answerMarker() {
         return wrap(BOLD + GREEN, "▪");
     }

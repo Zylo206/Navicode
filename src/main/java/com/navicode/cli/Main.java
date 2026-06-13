@@ -75,6 +75,7 @@ import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -2472,42 +2473,96 @@ public class Main {
         }
         try {
             BufferedReader reader = new BufferedReader(new InputStreamReader(input));
-            out.println("🔧 首次启动配置向导");
-            out.println("未检测到可用 API Key。请选择 provider 并写入 ~/.navicode/config.json。");
-            out.println("支持: glm / deepseek / step / kimi / freellmapi");
+            out.println(AnsiStyle.heading("Navicode setup"));
+            out.println(AnsiStyle.subtle("No available API key was found. Choose a setup path:"));
+            out.println("> MiMo/Auto-compatible");
+            out.println("  OpenAI compatible");
+            out.println("  Import config");
+            out.println("  Skip");
 
-            String provider = prompt(reader, out, "Provider [glm]: ");
-            provider = provider.isBlank() ? "glm" : normalizeProviderName(provider);
-            if (!isSupportedProvider(provider)) {
-                out.println("❌ 不支持 provider: " + provider);
-                return false;
-            }
-
-            String apiKey = prompt(reader, out, "API Key (留空取消): ");
-            if (apiKey.isBlank()) {
-                out.println("已取消配置向导。");
-                return false;
-            }
-
-            String model = prompt(reader, out, "Model (可选): ");
-            String baseUrl = prompt(reader, out, "Base URL (OpenAI-compatible provider 可填，可选): ");
-
-            NavicodeConfig.ProviderConfig providerConfig = ensureProviderConfig(config, provider);
-            providerConfig.setApiKey(apiKey.trim());
-            if (!model.isBlank()) {
-                providerConfig.setModel(model.trim());
-            }
-            if (!baseUrl.isBlank()) {
-                providerConfig.setBaseUrl(baseUrl.trim());
-            }
-            config.setDefaultProvider(provider);
-            config.save();
-            out.println("✅ 配置已保存。默认 provider: " + provider);
-            return true;
+            String choice = prompt(reader, out, "Select [MiMo]: ");
+            return switch (normalizeSetupChoice(choice)) {
+                case "openai" -> configureOpenAiCompatibleSetup(config, reader, out, false);
+                case "import" -> importFirstLaunchConfig(config, reader, out);
+                case "skip" -> {
+                    out.println("Setup skipped.");
+                    yield false;
+                }
+                default -> configureOpenAiCompatibleSetup(config, reader, out, true);
+            };
         } catch (IOException e) {
             out.println("❌ 配置向导读取输入失败: " + e.getMessage());
             return false;
         }
+    }
+
+    private static String normalizeSetupChoice(String choice) {
+        String normalized = choice == null ? "" : choice.trim().toLowerCase(Locale.ROOT);
+        if (normalized.isBlank() || "1".equals(normalized) || "mimo".equals(normalized)
+                || "auto".equals(normalized) || "mimo/auto".equals(normalized)) {
+            return "mimo";
+        }
+        if ("2".equals(normalized) || "openai".equals(normalized) || "openai-compatible".equals(normalized)
+                || "openai compatible".equals(normalized)) {
+            return "openai";
+        }
+        if ("3".equals(normalized) || "import".equals(normalized) || "import config".equals(normalized)) {
+            return "import";
+        }
+        if ("4".equals(normalized) || "skip".equals(normalized) || "s".equals(normalized)) {
+            return "skip";
+        }
+        return "mimo";
+    }
+
+    private static boolean configureOpenAiCompatibleSetup(NavicodeConfig config,
+                                                          BufferedReader reader,
+                                                          PrintStream out,
+                                                          boolean autoDefaults) throws IOException {
+        String provider = "freellmapi";
+        String baseUrlPrompt = autoDefaults
+                ? "Base URL [http://localhost:5173/v1]: "
+                : "OpenAI-compatible base URL [http://localhost:5173/v1]: ";
+        String baseUrl = prompt(reader, out, baseUrlPrompt);
+        String apiKey = prompt(reader, out, "API Key (blank cancels; local gateways may accept any value): ");
+        if (apiKey.isBlank()) {
+            out.println("Setup cancelled.");
+            return false;
+        }
+        String model = prompt(reader, out, autoDefaults ? "Model [auto]: " : "Model [auto]: ");
+
+        NavicodeConfig.ProviderConfig providerConfig = ensureProviderConfig(config, provider);
+        providerConfig.setApiKey(apiKey.trim());
+        providerConfig.setBaseUrl(baseUrl.isBlank() ? "http://localhost:5173/v1" : baseUrl.trim());
+        providerConfig.setModel(model.isBlank() ? "auto" : model.trim());
+        config.setDefaultProvider(provider);
+        config.save();
+        out.println("✅ Setup saved. Default provider: " + provider);
+        return true;
+    }
+
+    private static boolean importFirstLaunchConfig(NavicodeConfig config,
+                                                   BufferedReader reader,
+                                                   PrintStream out) throws IOException {
+        String path = prompt(reader, out, "Config path (blank cancels): ");
+        if (path.isBlank()) {
+            out.println("Import cancelled.");
+            return false;
+        }
+        Path source = Path.of(path).toAbsolutePath().normalize();
+        if (Files.notExists(source)) {
+            out.println("❌ Config file not found: " + source);
+            return false;
+        }
+        Path target = NavicodeConfig.configFile();
+        Files.createDirectories(target.getParent());
+        Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
+
+        NavicodeConfig imported = NavicodeConfig.load();
+        config.setDefaultProvider(imported.getDefaultProvider());
+        config.setProviders(imported.getProviders());
+        out.println("✅ Config imported: " + target);
+        return true;
     }
 
     private static String prompt(BufferedReader reader, PrintStream out, String message) throws IOException {
@@ -2552,13 +2607,13 @@ public class Main {
                 : info.skillsEnabled() + "/" + info.skillsTotal() + " skills";
         String ready = "Model " + model + " (" + provider + ")";
         String capabilities = "ReAct · Plan · MCP · Browser · Image · Tools · Memory · RAG";
-        String state = mcp + " · " + skills + " · ReAct";
+        String state = styledMcpStatus(info, mcp) + AnsiStyle.subtle(" · " + skills + " · ReAct");
         List<String> lines = new ArrayList<>(List.of(
-                "   " + AnsiStyle.section("██████████") + "    " + AnsiStyle.emphasis("Navicode") + " " + AnsiStyle.section("π") + "  " + AnsiStyle.subtle("v" + VERSION),
-                "   " + AnsiStyle.section("  ██  ██") + "    " + AnsiStyle.subtle(ready),
-                "   " + AnsiStyle.section("  ██  ██") + "    " + AnsiStyle.subtle(state),
-                "   " + AnsiStyle.section("  ██  ██") + "    " + AnsiStyle.subtle(capabilities),
-                "   " + AnsiStyle.section("  ██  ██"),
+                "   " + AnsiStyle.logoPrimary("██      ██") + "    " + AnsiStyle.brand("Navicode") + "  " + AnsiStyle.subtle("v" + VERSION),
+                "   " + AnsiStyle.logoSecondary("████    ██") + "    " + AnsiStyle.subtle(ready),
+                "   " + AnsiStyle.logoSecondary("██  ██  ██") + "    " + state,
+                "   " + AnsiStyle.logoSecondary("██    ████") + "    " + AnsiStyle.subtle(capabilities),
+                "   " + AnsiStyle.logoPrimary("██      ██"),
                 "",
                 "Tips for getting started:",
                 "1. Type " + AnsiStyle.emphasis("/") + " for commands and Tab completion",
@@ -2570,6 +2625,16 @@ public class Main {
             lines.add(AnsiStyle.subtle(info.note().replace('\n', ' ')));
         }
         return lines;
+    }
+
+    private static String styledMcpStatus(StartupScreenInfo info, String text) {
+        if (info.mcpTotal() <= 0 || info.mcpReady() == info.mcpTotal()) {
+            return AnsiStyle.subtle(text);
+        }
+        if (info.mcpReady() <= 0) {
+            return AnsiStyle.error(text);
+        }
+        return AnsiStyle.warning(text);
     }
 
     static McpConfigBootstrapResult ensureDefaultMcpConfig(Path userHome) throws IOException {

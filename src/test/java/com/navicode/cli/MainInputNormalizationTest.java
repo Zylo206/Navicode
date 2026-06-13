@@ -1,5 +1,6 @@
 package com.navicode.cli;
 
+import com.navicode.config.NavicodeConfig;
 import org.jline.reader.History;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
@@ -57,15 +58,37 @@ class MainInputNormalizationTest {
         List<String> lines = Main.startupBannerLines();
 
         assertTrue(lines.stream().anyMatch(line -> line.contains("Navicode")));
-        assertTrue(lines.stream().anyMatch(line -> line.contains("π")));
+        assertTrue(lines.stream().noneMatch(line -> line.contains("π")));
         assertTrue(lines.stream().anyMatch(line -> line.contains("v16.1.0")));
-        assertTrue(lines.stream().anyMatch(line -> line.contains("████████")));
+        assertTrue(lines.stream().anyMatch(line -> line.contains("██      ██")));
+        assertTrue(lines.stream().anyMatch(line -> line.contains("██  ██  ██")));
         assertTrue(lines.stream().anyMatch(line -> line.contains("Tips for getting started")));
         assertTrue(lines.stream().anyMatch(line -> line.contains("@path")));
+        assertTrue(lines.stream().noneMatch(line -> line.contains("Navicode setup")));
+        assertTrue(lines.stream().noneMatch(line -> line.contains("MiMo/Auto-compatible")));
+        assertTrue(lines.stream().noneMatch(line -> line.contains("API Key")));
         assertTrue(lines.stream().noneMatch(line -> line.contains("for shortcuts")));
         assertTrue(lines.stream().noneMatch(line -> line.contains("────────────────")));
         assertTrue(lines.stream().noneMatch(line -> line.endsWith("║")),
                 "banner should not depend on a padded right border");
+    }
+
+    @Test
+    void firstLaunchWizardShowsSetupChoicesAndCanSkip() {
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        boolean configured = Main.runFirstLaunchWizard(
+                new NavicodeConfig(),
+                new ByteArrayInputStream("4\n".getBytes(StandardCharsets.UTF_8)),
+                new PrintStream(sink, true, StandardCharsets.UTF_8));
+
+        String output = sink.toString(StandardCharsets.UTF_8);
+        assertFalse(configured);
+        assertTrue(output.contains("Navicode setup"), output);
+        assertTrue(output.contains("MiMo/Auto-compatible"), output);
+        assertTrue(output.contains("OpenAI compatible"), output);
+        assertTrue(output.contains("Import config"), output);
+        assertTrue(output.contains("Skip"), output);
+        assertTrue(output.contains("Setup skipped."), output);
     }
 
     @Test
