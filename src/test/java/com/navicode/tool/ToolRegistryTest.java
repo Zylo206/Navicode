@@ -27,9 +27,13 @@ class ToolRegistryTest {
         ToolRegistry registry = new ToolRegistry();
         registry.setProjectPath(tempDir.toString());
 
-        String result = registry.executeTool("execute_command", "{\"command\":\"pwd\"}");
+        String command = isWindows()
+                ? "Set-Content -Path cwd-marker.txt -Value ok"
+                : "printf ok > cwd-marker.txt";
+        String result = registry.executeTool("execute_command", "{\"command\":\"" + command + "\"}");
 
-        assertTrue(result.contains(tempDir.toString()));
+        assertTrue(result.contains("exit code: 0"));
+        assertTrue(Files.exists(tempDir.resolve("cwd-marker.txt")));
     }
 
     @Test
@@ -365,5 +369,9 @@ class ToolRegistryTest {
         } else {
             System.setProperty(key, previous);
         }
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase().contains("win");
     }
 }

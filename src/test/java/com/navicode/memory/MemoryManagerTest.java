@@ -80,7 +80,8 @@ class MemoryManagerTest {
     void shouldStoreProjectScopedFactsByDefault() {
         LongTermMemory longTermMemory = new LongTermMemory(tempDir.toFile());
         MemoryManager memoryManager = new MemoryManager(new StubGLMClient(List.of()), 32768, 128000, longTermMemory);
-        memoryManager.setProjectPath("/repo/current");
+        Path projectRoot = tempDir.resolve("current");
+        memoryManager.setProjectPath(projectRoot.toString());
 
         memoryManager.storeFact("当前项目使用 Java 17");
         memoryManager.storeFact("默认用中文回答", "global");
@@ -95,11 +96,13 @@ class MemoryManagerTest {
     void shouldSearchOnlyCurrentProjectAndGlobalFacts() {
         LongTermMemory longTermMemory = new LongTermMemory(tempDir.toFile());
         MemoryManager memoryManager = new MemoryManager(new StubGLMClient(List.of()), 32768, 128000, longTermMemory);
-        memoryManager.setProjectPath("/repo/current");
+        Path projectRoot = tempDir.resolve("current");
+        Path otherProjectRoot = tempDir.resolve("other");
+        memoryManager.setProjectPath(projectRoot.toString());
         longTermMemory.store(new MemoryEntry("current", "当前项目使用 Java 17", MemoryEntry.MemoryType.FACT,
                 java.util.Map.of("scope", "project", "project", memoryManager.getCurrentProject()), 10));
         longTermMemory.store(new MemoryEntry("other", "其他项目使用 Java 8", MemoryEntry.MemoryType.FACT,
-                java.util.Map.of("scope", "project", "project", "/repo/other"), 10));
+                java.util.Map.of("scope", "project", "project", otherProjectRoot.toAbsolutePath().normalize().toString()), 10));
 
         List<MemoryEntry> results = memoryManager.searchLongTerm("Java", 10);
 
