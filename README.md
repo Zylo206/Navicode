@@ -58,6 +58,8 @@ java -jar target/navicode-1.0-SNAPSHOT.jar
 mvn test -Pquick -DskipTests=false
 ```
 
+`quick` profile 会跳过一组慢测试与外部依赖路径，目前包括 `ToolRegistryTest`、`WebFetcherTest`、`McpServerManagerTest`、`StdioTransportTest`、`StreamableHttpTransportTest`；要验证这些模块，需要额外跑针对性测试。
+
 ## 模型配置
 
 Navicode 会按以下顺序读取 API Key：
@@ -140,7 +142,7 @@ Navicode 会按以下顺序读取 API Key：
 
 ## 内置工具
 
-Agent 可调用的核心工具包括：
+Agent 可调用的基础内置工具包括：
 
 - 文件与目录：`read_file`、`write_file`、`list_dir`
 - 代码定位：`glob_files`、`grep_code`
@@ -149,6 +151,7 @@ Agent 可调用的核心工具包括：
 - 代码语义检索：`search_code`
 - 联网：`web_search`、`web_fetch`
 - 快照恢复：`revert_turn`
+- 辅助工具：browser、skill、memory、snapshot 相关工具
 - MCP 动态工具：`mcp__{server}__{tool}`
 
 代码库问题默认优先走 `glob_files` / `grep_code` / `read_file` 做实时精确定位；`search_code` 是语义辅助检索，不替代精确搜索。
@@ -336,6 +339,7 @@ mvn test -Dtest=CliCommandParserTest,MemoryManagerTest,MemoryRetrieverTest -Dski
 | Memory | `mvn test -Dtest=MemoryManagerTest,MemoryRetrieverTest,WorkspaceMemoryTest,GoalManagerTest -DskipTests=false` |
 | RAG | `mvn test -Dtest=CodeChunkerTest,CodeAnalyzerTest,VectorStoreTest,CodeIndexTest -DskipTests=false` |
 | 工具与策略 | `mvn test -Dtest=ToolRegistryTest,CodeSearchGoldenSetTest,ApprovalPolicyTest -DskipTests=false` |
+| Web | `mvn test -Dtest=WebFetcherTest,SearchProviderFactoryTest,NetworkPolicyTest -DskipTests=false` |
 | TUI | `mvn test -Pphase16-smoke -DskipTests=false` |
 | Runtime API | `mvn test -Dtest=RuntimeApiServerTest -DskipTests=false` |
 | WeChat Bridge | `cd integrations/wechat-bridge && npm test` |
@@ -358,12 +362,12 @@ src/main/java/com/navicode/
 ├── policy/      路径围栏、命令策略、审计
 ├── prompt/      prompt 分层组装
 ├── rag/         代码索引、向量库、语义检索
-├── render/      Inline / Plain renderer
+├── render/      Renderer 抽象与 Inline / Plain renderer（默认交互主链路）
 ├── runtime/     Runtime API 与后台任务
 ├── skill/       Skill 扫描、索引、加载
 ├── snapshot/    Side-Git 快照
 ├── tool/        内置工具注册与执行
-├── tui/         Lanterna TUI
+├── tui/         Lanterna 全屏 TUI 与 TuiBootstrap
 ├── util/        Markdown 渲染、ANSI、分词工具
 └── web/         搜索、抓取、正文提取、网络策略
 ```
