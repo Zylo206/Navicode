@@ -331,6 +331,11 @@ mvn test -Pphase16-smoke -DskipTests=false
 mvn test -Dtest=CliCommandParserTest,MemoryManagerTest,MemoryRetrieverTest -DskipTests=false
 ```
 
+GitHub Actions:
+
+- `.github/workflows/ci.yml`：PR / `main` push 必跑 Java quick、工具定向测试、Web 定向测试、inline/TUI 渲染烟测、WeChat Bridge 测试，并上传 jar 产物。
+- `.github/workflows/nightly.yml`：每天 02:00（Asia/Shanghai）和手动触发时跑完整 Maven 回归与 WeChat Bridge 测试。
+
 常用定位：
 
 | 场景 | 命令 |

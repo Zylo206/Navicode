@@ -1,0 +1,157 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  java-quick:
+    name: Java quick (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Run quick regression
+        run: mvn -B -ntp test -Pquick -DskipTests=false
+
+  java-targeted:
+    name: Java targeted tools
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Run targeted tool tests
+        run: mvn -B -ntp test "-Dtest=ToolRegistryTest,CodeSearchGoldenSetTest,ApprovalPolicyTest" -DskipTests=false
+
+  java-web:
+    name: Java web tests
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Run web tests
+        run: mvn -B -ntp test "-Dtest=WebFetcherTest,SearchProviderFactoryTest,NetworkPolicyTest" -DskipTests=false
+
+  java-render-smoke:
+    name: Java render smoke
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Run inline and TUI smoke tests
+        run: mvn -B -ntp test -Pphase16-smoke -DskipTests=false
+
+  wechat-bridge:
+    name: WeChat bridge
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        working-directory: integrations/wechat-bridge
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: integrations/wechat-bridge/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run bridge tests
+        run: npm test
+
+  package:
+    name: Package jar
+    runs-on: windows-latest
+    timeout-minutes: 20
+    needs:
+      - java-quick
+      - java-targeted
+      - java-web
+      - java-render-smoke
+      - wechat-bridge
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Build package
+        run: mvn -B -ntp -DskipTests package
+
+      - name: Upload jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: navicode-jar
+          path: target/navicode-1.0-SNAPSHOT.jar
+          if-no-files-found: error
